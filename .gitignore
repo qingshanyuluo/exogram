@@ -1,0 +1,61 @@
+# ==== 隐私与敏感信息 ====
+# 环境变量文件（包含 API 密钥等）
+.env
+.env.local
+.env.*.local
+
+# IDE 配置（可能包含个人设置和调试配置）
+.vscode/
+.idea/
+
+# ==== Python ====
+# 字节码缓存
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 分发/打包
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+*.egg
+
+# 虚拟环境
+.venv/
+venv/
+ENV/
+env/
+
+# ==== 测试与覆盖率 ====
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+
+# ==== 运行时数据 ====
+# 数据目录中的实际运行数据（保留 .gitkeep）
+data/memory/*.jsonl
+data/recordings/*.json
+data/runs/*.json
+!data/**/.gitkeep
+
+# ==== 其他 ====
+*.log
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db

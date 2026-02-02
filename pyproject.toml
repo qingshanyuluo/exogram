@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "exogram"
+version = "0.1.0"
+description = "ETL for Experience: record -> distill -> long-term memory -> agentic execution"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "browser-use>=0.11.5",
+  "openai>=1.0.0",
+  "pydantic>=2.0.0",
+  "python-dotenv>=1.0.0",
+  "typer>=0.15.0",
+  # LangChain (OpenAI 兼容)
+  "langchain-core>=0.3.0",
+  "langchain-openai>=0.3.0",
+]
+
+[project.optional-dependencies]
+# 交互式浏览器录制
+recorder = [
+  "playwright",
+]
+
+ [project.scripts]
+exogram = "exogram.cli:app"
+ 
+ [tool.setuptools]
+ package-dir = {"" = "src"}
+ 
+ [tool.setuptools.packages.find]
+ where = ["src"]
