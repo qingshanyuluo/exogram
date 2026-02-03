@@ -7,14 +7,27 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
+from pydantic import ValidationError
 
 from exogram.models import RawStepsDocument
+from exogram.models_rich import (
+    KeyElement,
+    MetaInfo,
+    OperationKnowledge,
+    OperationPhase,
+    RichCognitionRecord,
+    TaskInfo,
+    WebsiteInfo,
+)
+from exogram.utils import get_logger
+
+logger = get_logger("Distill")
 
 
 # ========== Prompt 模板 ==========
@@ -222,8 +235,8 @@ class SemanticDistiller:
         *,
         api_key: str | None = None,
         base_url: str | None = None,
-        model: str = "gpt-4o-mini",
-        temperature: float = 0.3,
+        model: str = "gpt-4o",
+        temperature: float = 0.0,
     ):
         self.llm = ChatOpenAI(
             model=model,
@@ -238,7 +251,7 @@ class SemanticDistiller:
         raw: RawStepsDocument,
         *,
         verbose: bool = False,
-    ) -> dict[str, Any]:
+    ) -> RichCognitionRecord:
         """
         执行语义蒸馏，生成操作认知文档。
         
@@ -247,12 +260,16 @@ class SemanticDistiller:
             verbose: 是否输出详细日志
             
         Returns:
-            操作认知文档（dict）
+            RichCognitionRecord 类型化的操作认知文档
+            
+        Raises:
+            ValueError: 如果 LLM 输出无法解析为有效的 JSON
+            ValidationError: 如果解析后的数据不符合 RichCognitionRecord 模型
         """
         steps = [s.model_dump(mode="json") for s in raw.steps]
         
         if verbose:
-            print(f"[Distill] 分析 {len(steps)} 个操作步骤...")
+            logger.info(f"分析 {len(steps)} 个操作步骤...")
         
         # 构建 prompt 输入
         prompt_input = {
@@ -268,32 +285,35 @@ class SemanticDistiller:
         raw_output = response.content
         
         if verbose:
-            print(f"[Distill] LLM 返回 {len(raw_output)} 字符")
+            logger.info(f"LLM 返回 {len(raw_output)} 字符")
         
         # 解析 JSON
         result = self._parse_json(raw_output)
         
+        # 检查解析错误
+        if "_error" in result:
+            raise ValueError(f"LLM 输出解析失败: {result.get('_error')}. 原始输出: {result.get('_raw', '')[:500]}")
+        
         # 提取起始 URL
         start_url = _extract_start_url(steps)
         
-        # 添加元数据
-        result["_meta"] = {
-            "id": str(uuid.uuid4()),
-            "topic": raw.topic,
-            "created_at": datetime.utcnow().isoformat(),
-            "source": raw.source,
-            "steps_count": len(steps),
-            "start_url": start_url,  # 保存起始 URL
-        }
-        
-        # 如果 LLM 没有输出 website.url，从 _meta 补充
+        # 如果 LLM 没有输出 website.url，从 start_url 补充
         if "website" in result and isinstance(result["website"], dict):
             if not result["website"].get("url") and start_url:
                 result["website"]["url"] = start_url
         
-        result["_raw_llm_output"] = raw_output
+        # 构建元数据
+        result["_meta"] = {
+            "id": str(uuid.uuid4()),
+            "topic": raw.topic,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "source": raw.source,
+            "steps_count": len(steps),
+            "start_url": start_url,
+        }
         
-        return result
+        # 验证并返回类型化的记录
+        return RichCognitionRecord.model_validate(result)
     
     def _parse_json(self, text: str) -> dict:
         """解析 LLM 输出的 JSON"""
@@ -329,9 +349,9 @@ def distill_recording(
     *,
     api_key: str | None = None,
     base_url: str | None = None,
-    model: str = "gpt-4o-mini",
+    model: str = "gpt-4o",
     verbose: bool = False,
-) -> dict[str, Any]:
+) -> RichCognitionRecord:
     """
     便捷函数：蒸馏录制文件。
     
@@ -343,7 +363,7 @@ def distill_recording(
         verbose: 是否输出详细日志
         
     Returns:
-        操作认知文档
+        RichCognitionRecord 类型化的操作认知文档
     """
     import os
     from pathlib import Path

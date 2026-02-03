@@ -24,12 +24,23 @@ dependencies = [
 recorder = [
   "playwright",
 ]
+# 开发和测试
+dev = [
+  "pytest>=7.0.0",
+  "pytest-cov>=4.0.0",
+]
 
- [project.scripts]
+[project.scripts]
 exogram = "exogram.cli:app"
- 
- [tool.setuptools]
- package-dir = {"" = "src"}
- 
- [tool.setuptools.packages.find]
- where = ["src"]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]

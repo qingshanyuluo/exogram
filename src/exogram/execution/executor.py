@@ -14,6 +14,9 @@ except ImportError:
     ChatOpenAI = None
 
 from exogram.execution.auth import get_cdp_compatible_auth_file
+from exogram.utils import get_logger
+
+logger = get_logger("Executor")
 
 
 @dataclass(frozen=True)
@@ -66,7 +69,7 @@ class Executor:
             auth_file = get_cdp_compatible_auth_file(self.start_url)
             if auth_file:
                 browser_kwargs["storage_state"] = auth_file
-                print(f"✓ 已加载认证状态")
+                logger.info("已加载认证状态")
             full_task = f"首先打开网址: {self.start_url}\n\n{full_task}"
         
         browser = Browser(**browser_kwargs)

@@ -6,8 +6,9 @@ from pathlib import Path
 from typing import Any, Callable
 
 from exogram.models import RawStep, RawStepsDocument
-from exogram.utils import normalize_text, safe_preview_value
+from exogram.utils import get_logger, normalize_text, safe_preview_value
 
+logger = get_logger("exogram")
 
 # 默认 storage state 路径
 DEFAULT_STORAGE_STATE_DIR = Path.home() / ".exogram" / "auth"
@@ -1046,13 +1047,13 @@ class LiveRecorder:
                 try:
                     context = browser.new_context(storage_state=str(resolved_storage_path))
                     storage_loaded = True
-                    print(f"[exogram] 已加载登录态: {resolved_storage_path}")
+                    logger.info(f"已加载登录态: {resolved_storage_path}")
                 except Exception as e:
-                    print(f"[exogram] 加载登录态失败，使用空白上下文: {e}")
+                    logger.warning(f"加载登录态失败，使用空白上下文: {e}")
                     context = browser.new_context()
             else:
                 context = browser.new_context()
-                print(f"[exogram] 登录态文件不存在，首次录制后会保存到: {resolved_storage_path}")
+                logger.info(f"登录态文件不存在，首次录制后会保存到: {resolved_storage_path}")
 
             context.add_init_script(_INIT_SCRIPT)
             page = context.new_page()
@@ -1117,9 +1118,9 @@ class LiveRecorder:
                 try:
                     resolved_storage_path.parent.mkdir(parents=True, exist_ok=True)
                     context.storage_state(path=str(resolved_storage_path))
-                    print(f"[exogram] 已保存登录态: {resolved_storage_path}")
+                    logger.info(f"已保存登录态: {resolved_storage_path}")
                 except Exception as e:
-                    print(f"[exogram] 保存登录态失败: {e}")
+                    logger.error(f"保存登录态失败: {e}")
 
             try:
                 context.close()
@@ -1163,9 +1164,9 @@ class LiveRecorder:
             auth_domain=auth_domain,
         )
 
-        print(f"[exogram] 正在打开浏览器...")
-        print(f"[exogram] 请手动完成登录（如扫码），登录成功后关闭浏览器窗口")
-        print(f"[exogram] 登录态将保存到: {resolved_path}")
+        logger.info("正在打开浏览器...")
+        logger.info("请手动完成登录（如扫码），登录成功后关闭浏览器窗口")
+        logger.info(f"登录态将保存到: {resolved_path}")
 
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=False)
@@ -1187,9 +1188,9 @@ class LiveRecorder:
             try:
                 resolved_path.parent.mkdir(parents=True, exist_ok=True)
                 context.storage_state(path=str(resolved_path))
-                print(f"[exogram] 登录态已保存: {resolved_path}")
+                logger.info(f"登录态已保存: {resolved_path}")
             except Exception as e:
-                print(f"[exogram] 保存登录态失败: {e}")
+                logger.error(f"保存登录态失败: {e}")
                 raise
 
             try:

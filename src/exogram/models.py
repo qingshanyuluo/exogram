@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -23,14 +23,14 @@ class RawStep(BaseModel):
 class RawStepsDocument(BaseModel):
     topic: str
     source: str = Field(description="录制来源描述（例如 workflow-use export）")
-    created_at: datetime = Field(default_factory=lambda: datetime.utcnow())
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     steps: list[RawStep]
 
 
 class CognitionRecord(BaseModel):
     id: str
     topic: str
-    created_at: datetime = Field(default_factory=lambda: datetime.utcnow())
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     source_recording: str | None = None
     task_tags: list[str] = Field(default_factory=list)
     key_path_features: list[str] = Field(default_factory=list)
@@ -76,7 +76,7 @@ class SemanticRecord(BaseModel):
 
     id: str
     topic: str
-    created_at: datetime = Field(default_factory=lambda: datetime.utcnow())
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     source_recording: str | None = None
 
     # 总：整体理解

@@ -24,7 +24,7 @@ def load_settings() -> Settings:
     openai_base_url = os.getenv("OPENAI_BASE_URL") or None
     openai_timeout = float(os.getenv("EXOGRAM_OPENAI_TIMEOUT", "120"))
     openai_max_retries = int(os.getenv("EXOGRAM_OPENAI_MAX_RETRIES", "3"))
-    llm_temperature = float(os.getenv("EXOGRAM_LLM_TEMPERATURE", "1.0"))
+    llm_temperature = float(os.getenv("EXOGRAM_LLM_TEMPERATURE", "0.0"))
     llm_max_tokens = int(os.getenv("EXOGRAM_LLM_MAX_TOKENS", "16384"))
     return Settings(
         data_dir=data_dir,

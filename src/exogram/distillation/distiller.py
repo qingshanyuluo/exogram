@@ -1,13 +1,27 @@
+"""
+DEPRECATED: 此模块已废弃，请使用 semantic_distiller.py 中的 SemanticDistiller。
+
+本模块保留仅供参考和向后兼容，将在未来版本中删除。
+"""
 from __future__ import annotations
 
+import warnings
 import json
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from openai import APIStatusError, OpenAI
 
 from exogram.models import CognitionRecord, RawStepsDocument
 from exogram.utils import normalize_text
+
+# 发出废弃警告
+warnings.warn(
+    "exogram.distillation.distiller.Distiller 已废弃，"
+    "请改用 exogram.distillation.semantic_distiller.SemanticDistiller",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 
 class Distiller:
@@ -64,7 +78,7 @@ class Distiller:
         record = CognitionRecord(
             id=str(uuid.uuid4()),
             topic=topic,
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc),
             source_recording=source_recording,
             task_tags=parsed.get("task_tags", []),
             key_path_features=parsed.get("key_path_features", []),

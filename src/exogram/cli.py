@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -205,17 +205,17 @@ def distill(
         typer.secho(f"蒸馏失败: {e}", fg=typer.colors.RED)
         raise typer.Exit(code=1) from e
 
-    # 保存结果（不含原始 LLM 输出）
+    # 保存结果（使用类型化模型的序列化）
     import json
-    clean_result = {k: v for k, v in result.items() if not k.startswith("_raw")}
+    result_dict = result.model_dump(mode="json", by_alias=True)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(json.dumps(clean_result, ensure_ascii=False, indent=2), encoding="utf-8")
+    out_path.write_text(json.dumps(result_dict, ensure_ascii=False, indent=2), encoding="utf-8")
 
     typer.secho(f"已生成操作认知: {out_path}", fg=typer.colors.GREEN)
-    typer.echo(f"- 网站: {result.get('website', {}).get('name', '未知')}")
-    typer.echo(f"- 任务: {result.get('task', {}).get('summary', '未知')}")
-    typer.echo(f"- 操作阶段: {len(result.get('operation_flow', []))} 个")
-    typer.echo(f"- 关键元素: {len(result.get('key_elements', []))} 个")
+    typer.echo(f"- 网站: {result.website.name}")
+    typer.echo(f"- 任务: {result.task.summary}")
+    typer.echo(f"- 操作阶段: {len(result.operation_flow)} 个")
+    typer.echo(f"- 关键元素: {len(result.key_elements)} 个")
 
 
 @app.command()
@@ -247,12 +247,12 @@ def memorize(
     record = CognitionRecord(
         id=cog_data.get("_meta", {}).get("id", str(uuid.uuid4())),
         topic=topic,
-        created_at=datetime.fromisoformat(cog_data.get("_meta", {}).get("created_at", datetime.utcnow().isoformat())),
+        created_at=datetime.fromisoformat(cog_data.get("_meta", {}).get("created_at", datetime.now(timezone.utc).isoformat())),
         source_recording=cog_data.get("_meta", {}).get("source"),
         task_tags=[cog_data.get("task", {}).get("summary", "")],
         key_path_features=[el.get("name", "") for el in cog_data.get("key_elements", [])],
-        preference_rules=[tip for tip in cog_data.get("operational_knowledge", {}).get("form_tips", [])],
-        exception_handling=[p for p in cog_data.get("operational_knowledge", {}).get("precautions", [])],
+        preference_rules=[tip for tip in cog_data.get("operation_knowledge", {}).get("form_filling_tips", [])],
+        exception_handling=[p for p in cog_data.get("operation_knowledge", {}).get("precautions", [])],
         anti_patterns=[],
         summary=cog_data.get("task", {}).get("goal", "") or cog_data.get("website", {}).get("description", ""),
     )

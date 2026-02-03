@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import math
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from exogram.models import CognitionRecord, RetrievalHit
@@ -103,6 +103,11 @@ def _score_record(record: CognitionRecord, *, query: str) -> float:
             score += 1.0
 
     # 新近性加成（轻微）：越新越高
-    age_days = (datetime.utcnow() - record.created_at).total_seconds() / 86400.0
+    now = datetime.now(timezone.utc)
+    created_at = record.created_at
+    # 处理 naive datetime（无时区信息）的情况，假设它是 UTC
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=timezone.utc)
+    age_days = (now - created_at).total_seconds() / 86400.0
     recency_boost = 1.0 / (1.0 + max(age_days, 0.0) / 30.0)  # 30 天半衰
     return score * (0.7 + 0.3 * recency_boost) + 0.01 * math.log(1 + len(blob))

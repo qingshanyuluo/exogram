@@ -6,13 +6,18 @@
 from __future__ import annotations
 
 import json
-import tempfile
 from pathlib import Path
 from urllib.parse import urlparse
 
+from exogram.utils import get_logger
+
+logger = get_logger("Auth")
 
 # 默认的认证状态存储目录
 DEFAULT_AUTH_DIR = Path.home() / ".exogram" / "auth"
+
+# CDP 兼容的认证文件缓存目录
+CDP_AUTH_CACHE_DIR = DEFAULT_AUTH_DIR / ".cdp"
 
 # CDP 不支持的 cookie 字段（需要清理）
 CDP_INCOMPATIBLE_COOKIE_FIELDS = {"partitionKey", "_crHasCrossSiteAncestor"}
@@ -98,7 +103,7 @@ def load_storage_state(url: str, auth_dir: Path | None = None) -> dict | None:
         state = json.loads(content)
         return state
     except (json.JSONDecodeError, IOError) as e:
-        print(f"[Auth] 加载认证状态失败: {e}")
+        logger.warning(f"加载认证状态失败: {e}")
         return None
 
 
@@ -132,21 +137,33 @@ def get_cdp_compatible_auth_file(url: str, auth_dir: Path | None = None) -> str 
     此函数会：
     1. 查找原始认证文件
     2. 清理不兼容的字段
-    3. 保存到临时文件
-    4. 返回临时文件路径
+    3. 保存到缓存文件（~/.exogram/auth/.cdp/{domain}.json）
+    4. 返回缓存文件路径
+    
+    缓存文件仅在原始文件更新时重新生成，避免临时文件泄漏。
     
     Args:
         url: 目标网站 URL
         auth_dir: 认证文件存储目录
         
     Returns:
-        CDP 兼容的临时文件路径，如果没有找到原始文件则返回 None
+        CDP 兼容的缓存文件路径，如果没有找到原始文件则返回 None
     """
     auth_file = get_auth_file_path(url, auth_dir)
     if not auth_file:
         return None
     
+    # 确定缓存文件路径
+    cache_dir = CDP_AUTH_CACHE_DIR
+    cache_file = cache_dir / auth_file.name
+    
     try:
+        # 检查缓存是否有效（存在且比源文件新）
+        if cache_file.exists():
+            if cache_file.stat().st_mtime >= auth_file.stat().st_mtime:
+                return str(cache_file)
+        
+        # 读取并清理认证状态
         content = auth_file.read_text(encoding="utf-8")
         state = json.loads(content)
         
@@ -154,18 +171,12 @@ def get_cdp_compatible_auth_file(url: str, auth_dir: Path | None = None) -> str 
         if "cookies" in state:
             state["cookies"] = [_clean_cookie_for_cdp(c) for c in state["cookies"]]
         
-        # 保存到临时文件
-        temp_file = tempfile.NamedTemporaryFile(
-            mode="w",
-            suffix=".json",
-            prefix="exogram-auth-",
-            delete=False,  # 保留文件，browser-use 需要读取
-        )
-        json.dump(state, temp_file, indent=2)
-        temp_file.close()
+        # 保存到缓存文件
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        cache_file.write_text(json.dumps(state, indent=2), encoding="utf-8")
         
-        return temp_file.name
+        return str(cache_file)
         
     except (json.JSONDecodeError, IOError) as e:
-        print(f"[Auth] 处理认证状态失败: {e}")
+        logger.warning(f"处理认证状态失败: {e}")
         return None
