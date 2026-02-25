@@ -44,15 +44,16 @@ src/exogram/
 ├── memory/                # 长期记忆
 │   └── jsonl_store.py     # JSONL 存储：append、list_all、retrieve（简单文本/标签匹配）
 └── execution/             # 带知识执行
-    ├── executor.py        # 封装 browser-use Agent：注入 wisdom，run_sync/run
-    ├── context.py         # CognitiveContextManager：RichCognitionRecord → 系统指令（Prompt）
-    └── auth.py           # 登录态：get_cdp_compatible_auth_file（兼容 browser-use）
+    ├── executor.py        # Executor：Browser/LLM 生命周期管理 + browser-use Agent 驱动
+    ├── context.py         # Prompt 工程：CognitiveContextManager + SAFE_MODE_INSTRUCTION + build_agent_task()
+    ├── session.py         # InteractiveSession：终端 REPL 交互循环（浏览器保持打开）
+    └── auth.py            # 登录态：get_cdp_compatible_auth_file（兼容 browser-use）
 ```
 
 - **`/recording`**：产出 `RawStepsDocument`（.raw_steps.json），不依赖 selector，偏语义化。
 - **`/distillation`**：仅用 `SemanticDistiller`，输入 RawSteps，输出 `RichCognitionRecord`（.cognition.json）。
 - **`/memory`**：`JsonlMemoryStore` 存 `CognitionRecord`，支持按 topic/query 检索，供后续扩展「按任务检索记忆」。
-- **`/execution`**：加载 cognition → `CognitiveContextManager.build_system_instruction()` 得到 wisdom → `Executor.run_sync(task, wisdom)`。
+- **`/execution`**：加载 cognition → `CognitiveContextManager.build_system_instruction()` 得到 wisdom → `Executor.run(task, wisdom)`；`InteractiveSession` 包装终端交互循环。
 
 ---
 

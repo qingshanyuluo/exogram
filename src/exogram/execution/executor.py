@@ -14,23 +14,13 @@ except ImportError:
     ChatOpenAI = None
 
 from exogram.execution.auth import get_cdp_compatible_auth_file
+from exogram.execution.context import build_agent_task
 from exogram.utils import get_logger
 
 logger = get_logger("Executor")
 
 DEBUG_TIMING = os.getenv("EXOGRAM_DEBUG_TIMING", "0") == "1"
 FLASH_MODE = os.getenv("EXOGRAM_FLASH_MODE", "0") == "1"
-
-SAFE_MODE_INSTRUCTION = (
-    "\n\n【安全模式 — 重要规则】\n"
-    "在执行任务前，请先判断任务类型：\n"
-    "1. 查询/只读任务（如查看、搜索、查询、导出数据、查找信息）：正常完成全部操作并返回结果。\n"
-    "2. 写入/修改任务（如创建、新建、编辑、修改、删除、提交、发布、审批）：\n"
-    "   - 请导航到目标操作页面\n"
-    "   - 如有表单，可以帮助定位到相关区域\n"
-    "   - 但【绝对不要】点击最终的「提交」「创建」「确认」「删除」「发布」等执行按钮\n"
-    "   - 到达目标位置后，停止操作并在最终输出中说明：已导航到目标页面，请用户自行完成最终操作\n"
-)
 
 
 def _log_timing(label: str, start: float) -> None:
@@ -45,7 +35,11 @@ class RunResult:
 
 
 class Executor:
-    """基于认知执行任务的执行器，支持持久浏览器会话和交互式循环。"""
+    """基于认知执行任务的执行器，支持持久浏览器会话。
+
+    职责：管理 Browser / LLM 生命周期，驱动 browser-use Agent 执行。
+    不包含终端交互逻辑（见 session.InteractiveSession）。
+    """
 
     def __init__(
         self,
@@ -131,22 +125,18 @@ class Executor:
         self,
         *,
         task: str,
-        wisdom: str | None = None,
+        wisdom: str = "",
         navigate_to_start: bool = True,
         safe_mode: bool = True,
     ) -> RunResult:
         total_start = time.time()
-        wisdom = (wisdom or "").strip()
 
-        full_task = task.strip()
-        if wisdom:
-            full_task = f"{task.strip()}\n\n【认知指导】\n{wisdom}\n"
-
-        if navigate_to_start and self.start_url:
-            full_task = f"首先打开网址: {self.start_url}\n\n{full_task}"
-
-        if safe_mode:
-            full_task += SAFE_MODE_INSTRUCTION
+        full_task = build_agent_task(
+            task=task,
+            wisdom=wisdom,
+            start_url=self.start_url if navigate_to_start else None,
+            safe_mode=safe_mode,
+        )
 
         browser = self._ensure_browser()
         llm = self._ensure_llm()
@@ -183,58 +173,6 @@ class Executor:
         return RunResult(injected_wisdom=wisdom, history=history)
 
     # ------------------------------------------------------------------
-    # 交互式会话：任务完成后留在终端等待新任务
-    # ------------------------------------------------------------------
-
-    async def interactive_run(
-        self,
-        *,
-        task: str,
-        wisdom: str | None = None,
-        safe_mode: bool = True,
-    ) -> None:
-        """执行首个任务，然后进入交互循环，等待用户输入新任务。"""
-        try:
-            await self.run(
-                task=task, wisdom=wisdom,
-                navigate_to_start=True, safe_mode=safe_mode,
-            )
-        except Exception as e:
-            logger.error(f"❌ 任务执行出错: {e}")
-
-        _print_interactive_banner()
-
-        loop = asyncio.get_running_loop()
-        while True:
-            try:
-                user_input: str = await loop.run_in_executor(
-                    None, input, "📝 请输入新任务 (quit 退出): ",
-                )
-            except (EOFError, KeyboardInterrupt):
-                break
-
-            user_input = user_input.strip()
-            if not user_input:
-                continue
-            if user_input.lower() in ("quit", "exit", "q"):
-                break
-
-            logger.info("📡 正在获取当前页面状态…")
-            try:
-                await self.run(
-                    task=user_input, wisdom=wisdom,
-                    navigate_to_start=False, safe_mode=safe_mode,
-                )
-                print("\n✅ 任务执行完成！继续输入新任务或 quit 退出。\n")
-            except Exception as e:
-                logger.error(f"❌ 任务执行出错: {e}")
-                print("⚠️ 执行出错，浏览器保持打开。你可以继续输入新任务。\n")
-
-        print("\n🔄 正在关闭浏览器...")
-        await self.close()
-        print("👋 已退出。")
-
-    # ------------------------------------------------------------------
     # 生命周期
     # ------------------------------------------------------------------
 
@@ -243,14 +181,7 @@ class Executor:
             await self._browser.kill()
             self._browser = None
 
-    def run_interactive_sync(
-        self, *, task: str, wisdom: str | None = None, safe_mode: bool = True,
-    ) -> None:
-        asyncio.run(
-            self.interactive_run(task=task, wisdom=wisdom, safe_mode=safe_mode),
-        )
-
-    def run_sync(self, *, task: str, wisdom: str | None = None) -> RunResult:
+    def run_sync(self, *, task: str, wisdom: str = "") -> RunResult:
         """单次执行后关闭浏览器（向后兼容）。"""
         async def _run_and_close() -> RunResult:
             try:
@@ -258,11 +189,3 @@ class Executor:
             finally:
                 await self.close()
         return asyncio.run(_run_and_close())
-
-
-def _print_interactive_banner() -> None:
-    print("\n" + "=" * 60)
-    print("✅ 任务执行完成！浏览器保持打开。")
-    print("💡 你可以在浏览器中手动操作，也可以在下方输入新任务。")
-    print("   输入 quit / exit / q 退出程序并关闭浏览器。")
-    print("=" * 60 + "\n")

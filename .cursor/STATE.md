@@ -1,6 +1,6 @@
 # 当前开发状态
 
-- **[x] Completed**：实现交互式会话模式与安全模式，Executor 支持浏览器持久化和任务循环。
+- **[x] Completed**：重构 execution 模块——Executor 纯化为执行引擎，Prompt 工程统一到 context.py，终端交互循环提取到 session.py；cli.py 清理死代码并提取复用函数。
 
 ## 1. 当前阶段目标
 
@@ -24,7 +24,7 @@
 
 ## 3. 当前阻碍/已知问题 (Blockers & Bugs)
 
-- [x] 已修复：browser-use `Agent.close()` 在 `agent.run()` 完成后默认 kill 浏览器（`keep_alive` 默认 `None`），导致交互模式下浏览器被关闭。修复：创建 Browser 时传入 `keep_alive=True`。
+- [x] 已修复：browser-use `Agent.close()` 默认 kill 浏览器。修复：`keep_alive=True`。
 
 ## 4. 下一步行动计划 (Next Steps)
 

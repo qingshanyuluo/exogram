@@ -5,20 +5,24 @@ import os
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import typer
 from dotenv import load_dotenv
 
 from exogram.config import load_settings
-# 注：Distiller 是旧版蒸馏器，目前使用 SemanticDistiller
-from exogram.execution import Executor
+from exogram.execution import Executor, InteractiveSession
 from exogram.memory import JsonlMemoryStore
 from exogram.models import RawStepsDocument
 from exogram.recording import WorkflowUseJsonAdapter
 from exogram.utils import ensure_dir, read_json, write_json
 
 app = typer.Typer(no_args_is_help=True, add_completion=False, rich_markup_mode="markdown")
+
+
+# =====================================================================
+# 内部辅助
+# =====================================================================
 
 
 def _resolve_data_paths(data_dir: Path) -> dict[str, Path]:
@@ -28,6 +32,34 @@ def _resolve_data_paths(data_dir: Path) -> dict[str, Path]:
         "runs_dir": data_dir / "runs",
         "memory_jsonl": data_dir / "memory" / "memory.jsonl",
     }
+
+
+class _CognitionBundle(NamedTuple):
+    """认知加载结果：record + wisdom + start_url，供 run 命令使用。"""
+    wisdom: str
+    start_url: str | None
+    n_elements: int
+
+
+def _load_cognition_and_wisdom(cog_path: Path) -> _CognitionBundle:
+    """从 cognition.json 加载认知记录并构建 wisdom 字符串。"""
+    from exogram.models_rich import RichCognitionRecord
+    from exogram.execution.context import CognitiveContextManager
+
+    cog_data = json.loads(cog_path.read_text(encoding="utf-8"))
+    record = RichCognitionRecord.model_validate(cog_data)
+    start_url = record.website.url or record.meta.start_url
+    wisdom = CognitiveContextManager(record).build_system_instruction()
+    return _CognitionBundle(
+        wisdom=wisdom,
+        start_url=start_url,
+        n_elements=len(record.key_elements),
+    )
+
+
+# =====================================================================
+# CLI 命令
+# =====================================================================
 
 
 @app.command()
@@ -174,7 +206,6 @@ def distill(
     raw_obj = read_json(recording)
     raw_doc = RawStepsDocument.model_validate(raw_obj)
 
-    # 确定输出路径
     if out:
         out_path = out
     else:
@@ -182,7 +213,6 @@ def distill(
         if str(recording).endswith(".raw_steps.json"):
             out_path = Path(str(recording).replace(".raw_steps.json", ".cognition.json"))
 
-    # 使用语义蒸馏器
     from exogram.distillation.semantic_distiller import SemanticDistiller
 
     api_key = os.getenv("DISTILLATION_OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
@@ -205,8 +235,6 @@ def distill(
         typer.secho(f"蒸馏失败: {e}", fg=typer.colors.RED)
         raise typer.Exit(code=1) from e
 
-    # 保存结果（使用类型化模型的序列化）
-    import json
     result_dict = result.model_dump(mode="json", by_alias=True)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(result_dict, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -233,16 +261,13 @@ def memorize(
     load_dotenv()
     settings = load_settings()
     paths = _resolve_data_paths(settings.data_dir)
-    
+
     mem_path = memory_jsonl or paths["memory_jsonl"]
-    
-    # 读取 cognition.json
+
     cog_data = read_json(cognition)
-    
-    # 转换为 CognitionRecord 格式
+
     from exogram.models import CognitionRecord
-    
-    # 从 RichCognitionRecord 格式提取字段
+
     topic = cog_data.get("_meta", {}).get("topic", cognition.stem)
     record = CognitionRecord(
         id=cog_data.get("_meta", {}).get("id", str(uuid.uuid4())),
@@ -256,32 +281,11 @@ def memorize(
         anti_patterns=[],
         summary=cog_data.get("task", {}).get("goal", "") or cog_data.get("website", {}).get("description", ""),
     )
-    
-    # 追加到记忆库
+
     store = JsonlMemoryStore(mem_path)
     store.append(record)
-    
+
     typer.secho(f"✓ 已将 '{topic}' 导入记忆库: {mem_path}", fg=typer.colors.GREEN)
-
-
-def _format_wisdom(hits: list[tuple[float, dict[str, Any]]]) -> str:
-    chunks: list[str] = []
-    for score, obj in hits:
-        created_at = obj.get("created_at", "")
-        chunks.append(f"### 命中(score={score:.3f}, created_at={created_at})")
-        for _k, title in [
-            ("key_path_features", "关键路径特征"),
-            ("preference_rules", "偏好规则"),
-            ("exception_handling", "异常处理经验"),
-            ("anti_patterns", "反模式/噪声提醒"),
-        ]:
-            items = obj.get(_k) or []
-            if not items:
-                continue
-            chunks.append(f"- {title}:")
-            for it in items:
-                chunks.append(f"  - {it}")
-    return "\n".join(chunks).strip()
 
 
 @app.command()
@@ -311,6 +315,7 @@ def run(
     paths = _resolve_data_paths(settings.data_dir)
     ensure_dir(paths["runs_dir"])
 
+    # 1. 解析认知文件路径
     cog_path: Path | None = cognition
     if not cog_path and topic:
         cog_path = paths["recordings_dir"] / f"{topic}.cognition.json"
@@ -322,26 +327,19 @@ def run(
         typer.secho("❌ 请指定 --topic 或 --cognition", fg=typer.colors.RED)
         raise typer.Exit(code=1)
 
-    from exogram.models_rich import RichCognitionRecord
-    from exogram.execution.context import CognitiveContextManager
-
+    # 2. 加载认知 & 构建 wisdom
     typer.echo(f"📂 加载认知: {cog_path}")
-    cog_data = json.loads(cog_path.read_text(encoding="utf-8"))
-    record = RichCognitionRecord.model_validate(cog_data)
-
-    start_url = record.website.url or record.meta.start_url
-    if start_url:
-        typer.echo(f"✓ 起始 URL: {start_url}")
-
-    context_manager = CognitiveContextManager(record)
-    wisdom = context_manager.build_system_instruction()
-    typer.echo(f"✓ 已加载 {len(record.key_elements)} 个 UI 元素")
-    typer.echo(f"✓ 生成 {len(wisdom)} 字符认知指导")
+    bundle = _load_cognition_and_wisdom(cog_path)
+    if bundle.start_url:
+        typer.echo(f"✓ 起始 URL: {bundle.start_url}")
+    typer.echo(f"✓ 已加载 {bundle.n_elements} 个 UI 元素")
+    typer.echo(f"✓ 生成 {len(bundle.wisdom)} 字符认知指导")
 
     safe_mode = not no_safe_mode
     if safe_mode:
         typer.echo("🛡️ 安全模式已开启（写操作将只导航不执行）")
 
+    # 3. 创建 Executor
     typer.echo(f"\n🚀 开始执行任务...")
     executor = Executor(
         model=model or settings.agent_model,
@@ -351,37 +349,16 @@ def run(
         openai_max_retries=settings.openai_max_retries,
         temperature=settings.llm_temperature,
         max_completion_tokens=settings.llm_max_tokens,
-        start_url=start_url,
+        start_url=bundle.start_url,
     )
 
+    # 4. 分派执行模式
     if no_interactive:
-        result = executor.run_sync(task=task, wisdom=wisdom)
+        executor.run_sync(task=task, wisdom=bundle.wisdom)
         typer.secho("✅ 执行完成!", fg=typer.colors.GREEN)
     else:
-        executor.run_interactive_sync(task=task, wisdom=wisdom, safe_mode=safe_mode)
-
-
-def _safe_serialize_history(history: object) -> Any:
-    # 尽量把 history 转成 JSON 友好结构；不行就退化为 str
-    for attr in ("model_dump", "dict"):
-        fn = getattr(history, attr, None)
-        if callable(fn):
-            try:
-                return fn()  # type: ignore[misc]
-            except Exception:
-                pass
-
-    to_json = getattr(history, "to_json", None)
-    if callable(to_json):
-        try:
-            return json.loads(to_json())  # type: ignore[misc]
-        except Exception:
-            pass
-
-    try:
-        return json.loads(str(history))
-    except Exception:
-        return str(history)
+        session = InteractiveSession(executor, wisdom=bundle.wisdom, safe_mode=safe_mode)
+        session.start(initial_task=task)
 
 
 if __name__ == "__main__":
