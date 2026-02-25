@@ -290,53 +290,58 @@ def run(
     topic: str | None = typer.Option(None, "--topic", help="topic 名称（自动查找 data/recordings/{topic}.cognition.json）"),
     cognition: Path | None = typer.Option(None, "--cognition", exists=True, dir_okay=False, help="直接指定 cognition.json 文件"),
     model: str | None = typer.Option(None, "--model", help="执行模型"),
+    no_interactive: bool = typer.Option(False, "--no-interactive", help="执行后直接退出（不进入交互模式）"),
+    no_safe_mode: bool = typer.Option(False, "--no-safe-mode", help="关闭安全模式（允许 Agent 执行写操作）"),
 ) -> None:
     """
     基于认知执行任务：加载认知 -> 注入 prompt -> browser-use Agent 执行。
 
+    **默认行为**
+    - **安全模式 (默认开启)**：写操作（创建/删除/提交等）只导航到目标页面，不执行最终操作，提示用户自行完成。
+    - **交互模式 (默认开启)**：任务完成后浏览器保持打开，终端等待输入新任务。
+
     **示例**
 
-        exogram run --topic DemoLive --task "帮我新建一个需求"
-        exogram run --cognition demo.cognition.json --task "帮我新建一个需求"
+        exogram run --topic DemoLive --task "帮我查看最近的需求列表"
+        exogram run --topic DemoLive --task "帮我新建一个需求" --no-safe-mode
+        exogram run --topic DemoLive --task "搜索订单" --no-interactive
     """
     load_dotenv()
     settings = load_settings()
     paths = _resolve_data_paths(settings.data_dir)
     ensure_dir(paths["runs_dir"])
 
-    # 确定 cognition 文件路径
     cog_path: Path | None = cognition
     if not cog_path and topic:
-        # 自动查找 topic 对应的 cognition 文件
         cog_path = paths["recordings_dir"] / f"{topic}.cognition.json"
         if not cog_path.exists():
             typer.secho(f"❌ 未找到认知文件: {cog_path}", fg=typer.colors.RED)
             raise typer.Exit(code=1)
-    
+
     if not cog_path:
         typer.secho("❌ 请指定 --topic 或 --cognition", fg=typer.colors.RED)
         raise typer.Exit(code=1)
 
-    # 加载认知
     from exogram.models_rich import RichCognitionRecord
     from exogram.execution.context import CognitiveContextManager
-    
+
     typer.echo(f"📂 加载认知: {cog_path}")
     cog_data = json.loads(cog_path.read_text(encoding="utf-8"))
     record = RichCognitionRecord.model_validate(cog_data)
-    
-    # 提取 start_url
+
     start_url = record.website.url or record.meta.start_url
     if start_url:
         typer.echo(f"✓ 起始 URL: {start_url}")
-    
-    # 构建 wisdom
+
     context_manager = CognitiveContextManager(record)
     wisdom = context_manager.build_system_instruction()
     typer.echo(f"✓ 已加载 {len(record.key_elements)} 个 UI 元素")
     typer.echo(f"✓ 生成 {len(wisdom)} 字符认知指导")
 
-    # 执行
+    safe_mode = not no_safe_mode
+    if safe_mode:
+        typer.echo("🛡️ 安全模式已开启（写操作将只导航不执行）")
+
     typer.echo(f"\n🚀 开始执行任务...")
     executor = Executor(
         model=model or settings.agent_model,
@@ -348,9 +353,12 @@ def run(
         max_completion_tokens=settings.llm_max_tokens,
         start_url=start_url,
     )
-    result = executor.run_sync(task=task, wisdom=wisdom)
-    
-    typer.secho("✅ 执行完成!", fg=typer.colors.GREEN)
+
+    if no_interactive:
+        result = executor.run_sync(task=task, wisdom=wisdom)
+        typer.secho("✅ 执行完成!", fg=typer.colors.GREEN)
+    else:
+        executor.run_interactive_sync(task=task, wisdom=wisdom, safe_mode=safe_mode)
 
 
 def _safe_serialize_history(history: object) -> Any:
